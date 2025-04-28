@@ -1,7 +1,7 @@
 package main
 
 import (
-	"go-search/utils/queue"
+	"github.com/guilherme13c/go-search/utils/queue"
 )
 
 func main() {
