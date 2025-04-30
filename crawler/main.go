@@ -14,6 +14,7 @@ import (
 	"github.com/anaskhan96/soup"
 	"github.com/google/uuid"
 	"github.com/guilherme13c/go-search/utils/queue"
+	"github.com/guilherme13c/go-search/utils/set"
 	"github.com/jimsmart/grobotstxt"
 )
 
@@ -38,9 +39,10 @@ const (
 
 func main() {
 	os.RemoveAll("corpus/")
-	os.Mkdir("corpus", 077)
+	os.Mkdir("corpus", 0777)
 
 	frontier := queue.NewQueue[string]()
+	visited := set.NewSet[string]()
 	semaphore := make(chan struct{}, 128)
 
 	seedFile, errOpenSeedFile := os.Open("crawler/seeds.txt")
@@ -147,11 +149,14 @@ func main() {
 				if strings.HasPrefix(extractedUrl, "/") || strings.HasPrefix(extractedUrl, "#") {
 					extractedUrl = domain + extractedUrl
 				}
+				if visited.Contains(url) {
+					continue
+				}
 				frontier.Put(extractedUrl)
 			}
 
 			docId := uuid.NewString()
-			file, err := os.Create("../corpus/" + docId + ".warc")
+			file, err := os.Create("corpus/" + docId + ".warc")
 			if err != nil {
 				return
 			}
