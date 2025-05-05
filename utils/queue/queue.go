@@ -12,30 +12,30 @@ type Queue[T any] interface {
 }
 
 type queue[T any] struct {
-	lock sync.RWMutex
+	mu   sync.RWMutex
 	data []T
 	size int
 }
 
 func NewQueue[T any]() Queue[T] {
 	return &queue[T]{
-		lock: sync.RWMutex{},
+		mu:   sync.RWMutex{},
 		data: make([]T, 0),
 		size: 0,
 	}
 }
 
 func (self *queue[T]) Put(elem T) {
-	self.lock.Lock()
-	defer self.lock.Unlock()
+	self.mu.Lock()
+	defer self.mu.Unlock()
 
 	self.data = append(self.data, elem)
 	self.size += 1
 }
 
 func (q *queue[T]) Get() (T, bool) {
-	q.lock.Lock()
-	defer q.lock.Unlock()
+	q.mu.Lock()
+	defer q.mu.Unlock()
 
 	if q.size == 0 {
 		return *new(T), false
@@ -52,8 +52,8 @@ func (q *queue[T]) Get() (T, bool) {
 }
 
 func (self *queue[T]) Len() int {
-	self.lock.RLock()
-	defer self.lock.RUnlock()
+	self.mu.RLock()
+	defer self.mu.RUnlock()
 
 	return self.size
 }

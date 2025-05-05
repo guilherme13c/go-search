@@ -1,18 +1,37 @@
 package lrucache
 
 import (
+	"sync"
+
 	dll "github.com/guilherme13c/go-search/utils/doubly-linked-list"
 )
 
-type lrucache[K comparable, V any] struct {
+type LRUCache[K comparable, V any] struct {
 	capacity uint
 	size     uint
 
 	m map[K]*dll.DoublyLinkedListNode[K, V]
 	l dll.DoublyLinkedList[K, V]
+
+	mu sync.Mutex
 }
 
-func (self *lrucache[K, V]) Get(key K) (*V, bool) {
+func NewLRUCache[K comparable, V any](capacity uint) *LRUCache[K, V] {
+	ll := dll.NewDoublyLinkedList[K, V]()
+
+	return &LRUCache[K, V]{
+		capacity: capacity,
+		size:     0,
+		m:        make(map[K]*dll.DoublyLinkedListNode[K, V], capacity),
+		l:        *ll,
+		mu:       sync.Mutex{},
+	}
+}
+
+func (self *LRUCache[K, V]) Get(key K) (*V, bool) {
+	self.mu.Lock()
+	defer self.mu.Unlock()
+
 	node, ok := self.m[key]
 	if !ok {
 		return nil, false
@@ -24,7 +43,10 @@ func (self *lrucache[K, V]) Get(key K) (*V, bool) {
 	return &node.Value, true
 }
 
-func (self *lrucache[K, V]) Put(key K, value V) {
+func (self *LRUCache[K, V]) Put(key K, value V) {
+	self.mu.Lock()
+	defer self.mu.Unlock()
+
 	node, ok := self.m[key]
 	if ok {
 		self.l.Remove(node)
@@ -37,7 +59,7 @@ func (self *lrucache[K, V]) Put(key K, value V) {
 		delete(self.m, lru.Key)
 		self.size--
 	}
-	newNode := &dll.DoublyLinkedListNode[K, V]{Key: key, Value: value}
+	newNode := dll.NewDoublyLinkedListNode(key, value)
 	self.m[key] = newNode
 	self.l.Insert(newNode)
 	self.size++

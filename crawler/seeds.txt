@@ -1,2 +1,2 @@
-https://www.wikipedia.org
-https://www.youtube.com
+https://dumps.wikimedia.org/backup-index.html
+

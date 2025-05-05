@@ -8,9 +8,30 @@ type DoublyLinkedListNode[K any, V any] struct {
 	Prev *DoublyLinkedListNode[K, V]
 }
 
+func NewDoublyLinkedListNode[K any, V any](key K, value V) *DoublyLinkedListNode[K, V] {
+	return &DoublyLinkedListNode[K, V]{
+		Key:   key,
+		Value: value,
+		Next:  nil,
+		Prev:  nil,
+	}
+}
+
 type DoublyLinkedList[K any, V any] struct {
 	Head *DoublyLinkedListNode[K, V]
 	Tail *DoublyLinkedListNode[K, V]
+}
+
+func NewDoublyLinkedList[K any, V any]() *DoublyLinkedList[K, V] {
+	res := &DoublyLinkedList[K, V]{
+		Head: &DoublyLinkedListNode[K, V]{},
+		Tail: &DoublyLinkedListNode[K, V]{},
+	}
+
+	res.Head.Next = res.Tail
+	res.Tail.Prev = res.Head
+
+	return res
 }
 
 func (self *DoublyLinkedList[K, V]) Insert(node *DoublyLinkedListNode[K, V]) {

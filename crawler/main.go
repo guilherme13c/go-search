@@ -13,23 +13,14 @@ import (
 
 	"github.com/anaskhan96/soup"
 	"github.com/google/uuid"
+	lrucache "github.com/guilherme13c/go-search/utils/lru-cache"
 	"github.com/guilherme13c/go-search/utils/queue"
 	"github.com/guilherme13c/go-search/utils/set"
-	"github.com/jimsmart/grobotstxt"
 )
 
-type RobotsInfo struct {
-	Allowed    func(string, string) bool
-	CrawlDelay time.Duration
-	LastAccess time.Time
-}
-
 var (
-	robotsCache   = make(map[string]*RobotsInfo)
-	robotsOrder   []string
-	robotsMutex   sync.Mutex
-	crawlSchedule = make(map[string]time.Time)
-	scheduleMutex sync.Mutex
+	robotsCache = lrucache.LRUCache[string, map[string]string]{}
+	robotsMu    = sync.Mutex{}
 )
 
 const (
@@ -43,7 +34,7 @@ func main() {
 
 	frontier := queue.NewQueue[string]()
 	visited := set.NewSet[string]()
-	semaphore := make(chan struct{}, 128)
+	semaphore := make(chan struct{}, 512)
 
 	seedFile, errOpenSeedFile := os.Open("crawler/seeds.txt")
 	if errOpenSeedFile != nil {
@@ -73,50 +64,20 @@ func main() {
 				return
 			}
 
-			robotsMutex.Lock()
-			robots, exists := robotsCache[domain]
-			robotsMutex.Unlock()
+			{
+				robotsMu.Lock()
+				defer robotsMu.Unlock()
 
-			if !exists {
-				respRobots, err := soup.Get(domain + "/robots.txt")
-				if err != nil {
-					return
-				}
-				allowed := func(userAgent, path string) bool {
-					return grobotstxt.AgentAllowed(respRobots, userAgent, path)
-				}
-				crawlDelay := parseCrawlDelay(respRobots, userAgent)
-				robots = &RobotsInfo{
-					Allowed:    allowed,
-					CrawlDelay: time.Duration(crawlDelay) * time.Second,
-				}
+				_, exists := robotsCache.Get(domain)
+				if !exists {
+					respRobots, err := soup.Get(domain + "/robots.txt")
+					if err != nil {
+						return
+					}
 
-				robotsMutex.Lock()
-				robotsCache[domain] = robots
-				robotsOrder = append(robotsOrder, domain)
-				if len(robotsOrder) > maxCacheSize {
-					oldest := robotsOrder[0]
-					robotsOrder = robotsOrder[1:]
-					delete(robotsCache, oldest)
+					print(respRobots)
 				}
-				robotsMutex.Unlock()
 			}
-
-			if !robots.Allowed(userAgent, url) {
-				return
-			}
-
-			scheduleMutex.Lock()
-			nextAllowed := crawlSchedule[domain]
-			if time.Now().Before(nextAllowed) {
-				scheduleMutex.Unlock()
-				time.Sleep(time.Until(nextAllowed))
-				scheduleMutex.Lock()
-			}
-			crawlSchedule[domain] = time.Now().Add(robots.CrawlDelay)
-			scheduleMutex.Unlock()
-
-			fmt.Println(url)
 
 			resp, err := http.Get(url)
 			if err != nil {
