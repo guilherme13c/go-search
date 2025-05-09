@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -13,26 +14,28 @@ import (
 
 	"github.com/anaskhan96/soup"
 	"github.com/google/uuid"
+
 	lrucache "github.com/guilherme13c/go-search/utils/lru-cache"
 	"github.com/guilherme13c/go-search/utils/queue"
+	robotstxt "github.com/guilherme13c/go-search/utils/robots-txt"
 	"github.com/guilherme13c/go-search/utils/set"
-)
-
-var (
-	robotsCache = lrucache.LRUCache[string, map[string]string]{}
-	robotsMu    = sync.Mutex{}
 )
 
 const (
 	userAgent    = "go-search-bot/0.0.1"
-	maxCacheSize = 256
+	maxCacheSize = 1024
+)
+
+var (
+	robotsCache = lrucache.NewLruCache[string, robotstxt.Robotstxt](maxCacheSize)
+	robotsMu    = sync.Mutex{}
 )
 
 func main() {
 	os.RemoveAll("corpus/")
 	os.Mkdir("corpus", 0777)
 
-	frontier := queue.NewQueue[string]()
+	frontier := queue.NewQueue[string](0)
 	visited := set.NewSet[string]()
 	semaphore := make(chan struct{}, 512)
 
@@ -47,39 +50,56 @@ func main() {
 		frontier.Put(scanner.Text())
 	}
 
-	for {
+	robotsParser := robotstxt.NewParser(&http.Client{Timeout: time.Second * 5})
+
+	run := true
+
+	for run {
 		semaphore <- struct{}{}
 		go func() {
 			defer func() { <-semaphore }()
 			_, cancel := context.WithTimeout(context.Background(), time.Second*5)
 			defer cancel()
 
-			url, ok := frontier.Get()
+			pageUrl, ok := frontier.Get()
 			if !ok {
 				return
 			}
 
-			domain, err := getDomain(url)
+			domain, err := getDomain(pageUrl)
 			if err != nil {
 				return
 			}
 
+			var robotsTxt robotstxt.Robotstxt
 			{
 				robotsMu.Lock()
 				defer robotsMu.Unlock()
 
-				_, exists := robotsCache.Get(domain)
+				robotRules, exists := robotsCache.Get(domain)
 				if !exists {
-					respRobots, err := soup.Get(domain + "/robots.txt")
-					if err != nil {
+					rules, err := robotsParser.FetchAndParse(domain)
+					if err != nil || rules == nil {
 						return
 					}
 
-					print(respRobots)
+					robotsCache.Put(domain, *rules)
+					robotRules = rules
 				}
+				robotsTxt = *robotRules
+			}
+			fmt.Printf("%#v\n", robotsTxt)
+
+			u, err := url.Parse(pageUrl)
+			if err != nil {
+				return
+			}
+			if u.Scheme == "" {
+				u.Scheme = "https"
 			}
 
-			resp, err := http.Get(url)
+			client := http.Client{Timeout: time.Second * 5}
+			resp, err := client.Get(u.String())
 			if err != nil {
 				return
 			}
@@ -110,7 +130,7 @@ func main() {
 				if strings.HasPrefix(extractedUrl, "/") || strings.HasPrefix(extractedUrl, "#") {
 					extractedUrl = domain + extractedUrl
 				}
-				if visited.Contains(url) {
+				if visited.Contains(pageUrl) {
 					continue
 				}
 				frontier.Put(extractedUrl)
@@ -133,7 +153,7 @@ func main() {
 				"WARC-Type: response",
 				fmt.Sprintf("WARC-Date: %s", warcDate),
 				fmt.Sprintf("WARC-Record-ID: <urn:uuid:%s>", recordId),
-				fmt.Sprintf("WARC-Target-URI: %s", url),
+				fmt.Sprintf("WARC-Target-URI: %s", pageUrl),
 				"Content-Type: application/http; msgtype=response",
 				fmt.Sprintf("Content-Length: %d", len(bodyBytes)+len(contentType)+50),
 				"",
@@ -156,25 +176,4 @@ func getDomain(url string) (string, error) {
 		return "", fmt.Errorf("invalid URL")
 	}
 	return strings.Join(parts[:3], "/"), nil
-}
-
-func parseCrawlDelay(robotsTxt, userAgent string) time.Duration {
-	lines := strings.Split(robotsTxt, "\n")
-	matchedAgent := false
-	delay := time.Duration(0)
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(strings.ToLower(line), "user-agent:") {
-			agent := strings.TrimSpace(strings.SplitN(line, ":", 2)[1])
-			matchedAgent = (agent == "*" || strings.EqualFold(agent, userAgent))
-		} else if matchedAgent && strings.HasPrefix(strings.ToLower(line), "crawl-delay:") {
-			val := strings.TrimSpace(strings.SplitN(line, ":", 2)[1])
-			if secs, err := time.ParseDuration(val + "s"); err == nil {
-				delay = secs
-			}
-			matchedAgent = false
-		}
-	}
-	return delay
 }

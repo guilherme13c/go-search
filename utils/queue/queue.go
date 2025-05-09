@@ -11,21 +11,23 @@ type Queue[T any] interface {
 	Len() int
 }
 
-type queue[T any] struct {
-	mu   sync.RWMutex
-	data []T
-	size int
+type randomizedQueue[T any] struct {
+	mu     sync.RWMutex
+	data   []T
+	size   int
+	random *rand.Rand
 }
 
-func NewQueue[T any]() Queue[T] {
-	return &queue[T]{
-		mu:   sync.RWMutex{},
-		data: make([]T, 0),
-		size: 0,
+func NewQueue[T any](seed int64) Queue[T] {
+	return &randomizedQueue[T]{
+		mu:     sync.RWMutex{},
+		data:   make([]T, 0),
+		size:   0,
+		random: rand.New(rand.NewSource(seed)),
 	}
 }
 
-func (self *queue[T]) Put(elem T) {
+func (self *randomizedQueue[T]) Put(elem T) {
 	self.mu.Lock()
 	defer self.mu.Unlock()
 
@@ -33,25 +35,25 @@ func (self *queue[T]) Put(elem T) {
 	self.size += 1
 }
 
-func (q *queue[T]) Get() (T, bool) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
+func (self *randomizedQueue[T]) Get() (T, bool) {
+	self.mu.Lock()
+	defer self.mu.Unlock()
 
-	if q.size == 0 {
+	if self.size == 0 {
 		return *new(T), false
 	}
 
-	idx := rand.Intn(q.size)
-	elem := q.data[idx]
+	idx := self.random.Intn(self.size)
+	elem := self.data[idx]
 
-	q.data[idx] = q.data[q.size-1]
-	q.data = q.data[:q.size-1]
-	q.size--
+	self.data[idx] = self.data[self.size-1]
+	self.data = self.data[:self.size-1]
+	self.size--
 
 	return elem, true
 }
 
-func (self *queue[T]) Len() int {
+func (self *randomizedQueue[T]) Len() int {
 	self.mu.RLock()
 	defer self.mu.RUnlock()
 
